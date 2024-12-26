@@ -1,46 +1,105 @@
 const ytdl = require('ytdl-core');
+const path = require('path');
 const fs = require('fs');
 require("dotenv").config();
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const ffmpeg = require('fluent-ffmpeg');
 ffmpeg.setFfmpegPath(ffmpegPath);
-const axios = require('axios');
-
-import Mux from '@mux/mux-node';
-const client = new Video({
-    tokenId: process.env.MUX_ACCESS_TOKEN,
-    tokenSecret: process.env.MUX_SECRET_KEY,
-});
+const { exec } = require('child_process');
 
 const createShort = async (videoUrl, allShorts) => {
     const videoPath = 'video.mp4';
-    const trimmedPath = 'short.mp4'; // Output after trimming and adjusting aspect ratio
-    const finalPath = 'short_with_transcript.mp4';
 
     console.log('Downloading video...');
     await downloadVideo(videoUrl, videoPath);
 
-    const short = allShorts[0];  // Assuming you're processing the first short
-    console.log(short)
-    const startTime = convertToSeconds(short[0].start_time);
-    const endTime = convertToSeconds(short[short.length - 1].end_time);
+    const short = allShorts[0];
+    console.log(short);
 
-    try {
-        console.log('Trimming and adjusting aspect ratio...');
-        await trimVideo(videoPath, trimmedPath, startTime, endTime);
+    let reel_count = 1;
 
-        console.log('Adding transcript...');
-        await uploadVideoAndGetSubtitles(trimmedPath, finalPath);
+    for (const short of allShorts) {
+        const shortPath = `trimmed_short_${reel_count}.mp4`;
+        const finalPath = `final_short_${reel_count}.mp4`;
+        reel_count++;
 
-        console.log('Short created:', finalPath);
-    } catch (error) {
-        console.error('Error:', error);
+        const srtContent = generateSrt(short);
+        const srtfilePath = `subtitle_${reel_count}.mp4`;
+        fs.writeFileSync(srtfilePath, srtContent, 'utf8');
+        console.log(`SRT file has been generated at ${srtfilePath}`);
+        
+        const startTime = convertToSeconds(short[0].start_time);
+        const endTime = convertToSeconds(short[short.length - 1].end_time);
+
+        try {
+            console.log('Trimming and adjusting aspect ratio...');
+            await trimVideo(videoPath, shortPath, startTime, endTime);
+
+            console.log('Adding transcript...');
+            await embedSubtitles(shortPath, srtfilePath, finalPath);
+            console.log('Short created:', finalPath);
+        } catch (error) {
+            console.error('Error:', error);
+        }
     }
+
+    return "success";
 };
 
+function escapeWindowsPathWithBackslashAfterColon(filePath) {
+    return filePath.replace(/\\/g, '\\\\').replace(/^([a-zA-Z]):/, '$1\\:');
+}
+
 const convertToSeconds = (time) => {
+    if (typeof time !== 'string') {
+        throw new TypeError(`Expected a string, but got ${typeof time}`);
+    }
     const [minutes, seconds] = time.split(':').map(Number);
     return minutes * 60 + seconds;
+};
+
+function convertToSrtTime(seconds) {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainingSeconds = Math.floor(seconds % 60);
+    const milliseconds = Math.floor((seconds % 1) * 1000);
+
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')},${String(milliseconds).padStart(3, '0')}`;
+}
+
+function generateSrt(subtitles) {
+    let srtContent = '';
+    const baseStartTime = convertToSeconds(subtitles[0].start_time);
+
+    subtitles.forEach((subtitle, index) => {
+        const normalizedStart = Math.max(0, convertToSeconds(subtitle.start_time) - baseStartTime);
+        const normalizedEnd = Math.max(normalizedStart, convertToSeconds(subtitle.end_time) - baseStartTime);
+
+        const startTime = convertToSrtTime(normalizedStart);
+        const endTime = convertToSrtTime(normalizedEnd);
+
+        srtContent += `${index + 1}\n`;
+        srtContent += `${startTime} --> ${endTime}\n`;
+        srtContent += `${subtitle.snippet}\n\n`;
+    });
+
+    return srtContent;
+}
+
+const embedSubtitles = async(inputVideo, srtFile, outputVideo) => {
+    const ffmpegCommand = `ffmpeg -i "${escapeWindowsPathWithBackslashAfterColon(inputVideo)}" -vf "subtitles=${escapeWindowsPathWithBackslashAfterColon(srtFile)}:force_style='Fontsize=12'" -c:v libx264 -c:a aac "${escapeWindowsPathWithBackslashAfterColon(outputVideo)}"`;
+
+      const result = await exec(ffmpegCommand, (error, stdout, stderr) => {
+        if (error) {
+            console.error('Error embedding subtitles:', error);
+            return;
+        }
+        if (stderr) {
+            console.log('FFmpeg stderr:', stderr);
+        }
+        console.log('Subtitles embedded successfully:', stdout);
+    });
+    console.log(result)
 };
 
 const downloadVideo = (videoUrl, outputPath) => {
@@ -68,87 +127,6 @@ const trimVideo = (inputPath, outputPath, startTime, endTime) => {
             .on('error', reject)
             .run();
     });
-};
-
-// Function to upload video to Mux and get subtitles
-const uploadVideoAndGetSubtitles = async (videoPath, outputPath) => {
-    try {
-        console.log('Uploading video to Mux...');
-        const asset = await uploadVideoToMux(videoPath);
-
-        // Wait for video processing to complete
-        console.log('Waiting for video processing...');
-        const processedAsset = await waitForProcessing(asset.id);
-
-        // Fetch captions from the processed video
-        console.log('Fetching subtitles...');
-        const captionsTrack = await getCaptions(processedAsset.id);
-
-        // Download subtitles if they exist
-        if (captionsTrack && captionsTrack.url) {
-            await downloadSubtitles(captionsTrack.url, outputPath);
-        } else {
-            console.log('No captions found for this video.');
-        }
-    } catch (error) {
-        console.error('Error uploading video and getting subtitles:', error);
-    }
-};
-
-// Upload video to Mux
-const uploadVideoToMux = (videoPath) => {
-    return new Promise((resolve, reject) => {
-        client.video.Assets.create({
-            input: [{ url: 'https://storage.googleapis.com/muxdemofiles/mux-video-intro.mp4' }],
-        })
-            .then(resolve)
-            .catch(reject);
-    });
-};
-
-// Wait for video processing to complete
-const waitForProcessing = (assetId) => {
-    return new Promise(async (resolve, reject) => {
-        while (true) {
-            const updatedAsset = await mux.Assets.get(assetId);
-            if (updatedAsset.status === 'ready') {
-                resolve(updatedAsset);
-                break;
-            }
-            if (updatedAsset.status === 'errored') {
-                reject(new Error('Mux video processing failed.'));
-                break;
-            }
-            await new Promise((resolve) => setTimeout(resolve, 5000)); // Wait for 5 seconds
-        }
-    });
-};
-
-// Get captions for the video
-const getCaptions = async (assetId) => {
-    try {
-        const asset = await mux.Assets.get(assetId);
-        const captionsTrack = asset.tracks.find((track) => track.type === 'text');
-        return captionsTrack;
-    } catch (error) {
-        console.error('Error fetching captions:', error);
-    }
-};
-
-// Download subtitle file from Mux
-const downloadSubtitles = async (subtitleUrl, outputPath) => {
-    try {
-        const response = await axios.get(subtitleUrl, { responseType: 'stream' });
-        const subtitleStream = fs.createWriteStream(outputPath);
-        response.data.pipe(subtitleStream);
-
-        return new Promise((resolve, reject) => {
-            subtitleStream.on('finish', resolve);
-            subtitleStream.on('error', reject);
-        });
-    } catch (error) {
-        console.error('Error downloading subtitles:', error);
-    }
 };
 
 module.exports = { createShort };

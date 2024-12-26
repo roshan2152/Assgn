@@ -1,5 +1,6 @@
 const axios = require("axios");
 const { type } = require("os");
+require("dotenv").config();
 
 exports.getVideoCaptions = async (Id) => {
     const API_KEY = process.env.Rapid_API_KEY;
@@ -10,7 +11,7 @@ exports.getVideoCaptions = async (Id) => {
         method: 'POST',
         url: 'https://youtube-scraper-2023.p.rapidapi.com/video_transcript',
         headers: {
-            'x-rapidapi-key': '862da741c4msh4cbf048bf53b907p1c298cjsn59542c73510a',
+            'x-rapidapi-key': process.env.RAPID_API_KEY,
             'x-rapidapi-host': 'youtube-scraper-2023.p.rapidapi.com',
             'Content-Type': 'application/json'
         },

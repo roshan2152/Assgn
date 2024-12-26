@@ -33,3 +33,7 @@ Thumbs.db
 *.cache
 *.temp
 *.bak
+
+# Ignore .mp4 and .srt files
+*.mp4
+*.srt 

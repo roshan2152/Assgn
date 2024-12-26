@@ -33,7 +33,14 @@ app.post("/process_video", async (req, res) => {
         allShorts = allShorts[0].reels;
         // console.log("ALL SHORT", allShorts)
 
-        await shorts.createShort(url, allShorts)
+        const result = await shorts.createShort(url, allShorts)
+
+        if (result === "success") {
+            res.json({ success: true });
+        }
+        else {
+            res.json({ success: false, error: result });  
+        }
 
     } catch (error) {
         console.log("Caught error in app.js");
