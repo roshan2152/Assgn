@@ -13,9 +13,6 @@ const createShort = async (videoUrl, allShorts) => {
     console.log('Downloading video...');
     await downloadVideo(videoUrl, videoPath);
 
-    const short = allShorts[0];
-    console.log(short);
-
     let reel_count = 1;
 
     for (const short of allShorts) {
@@ -24,10 +21,10 @@ const createShort = async (videoUrl, allShorts) => {
         reel_count++;
 
         const srtContent = generateSrt(short);
-        const srtfilePath = `subtitle_${reel_count}.mp4`;
+        const srtfilePath = `subtitle_${reel_count}.srt`;
         fs.writeFileSync(srtfilePath, srtContent, 'utf8');
         console.log(`SRT file has been generated at ${srtfilePath}`);
-        
+
         const startTime = convertToSeconds(short[0].start_time);
         const endTime = convertToSeconds(short[short.length - 1].end_time);
 
@@ -36,13 +33,39 @@ const createShort = async (videoUrl, allShorts) => {
             await trimVideo(videoPath, shortPath, startTime, endTime);
 
             console.log('Adding transcript...');
-            await embedSubtitles(shortPath, srtfilePath, finalPath);
+            embedSubtitles(shortPath, srtfilePath, finalPath);
             console.log('Short created:', finalPath);
         } catch (error) {
             console.error('Error:', error);
         }
     }
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    const sourceFolder = path.join(__dirname, '..');
+    const targetFolder = path.join(__dirname, 'static');
+    if (!fs.existsSync(targetFolder)) {
+        fs.mkdirSync(targetFolder, { recursive: true });
+    }
 
+    // Read all files in the source folder
+    const files = fs.readdirSync(sourceFolder);
+    console
+
+    // Filter files that start with 'final_short_'
+    const filteredFiles = files.filter(file => file.startsWith('final_short_'));
+
+    filteredFiles.forEach(file => {
+        const sourcePath = path.join(sourceFolder, file);
+        const targetPath = path.join(targetFolder, file);
+
+        // Move each filtered file
+        fs.rename(sourcePath, targetPath, (err) => {
+            if (err) {
+                console.error(`Failed to move file ${file}:`, err);
+            } else {
+                console.log(`Moved ${file} to ${targetFolder}`);
+            }
+        });
+    });
     return "success";
 };
 
@@ -86,10 +109,10 @@ function generateSrt(subtitles) {
     return srtContent;
 }
 
-const embedSubtitles = async(inputVideo, srtFile, outputVideo) => {
+const embedSubtitles = (inputVideo, srtFile, outputVideo) => {
     const ffmpegCommand = `ffmpeg -i "${escapeWindowsPathWithBackslashAfterColon(inputVideo)}" -vf "subtitles=${escapeWindowsPathWithBackslashAfterColon(srtFile)}:force_style='Fontsize=12'" -c:v libx264 -c:a aac "${escapeWindowsPathWithBackslashAfterColon(outputVideo)}"`;
 
-      const result = await exec(ffmpegCommand, (error, stdout, stderr) => {
+    const result = exec(ffmpegCommand, (error, stdout, stderr) => {
         if (error) {
             console.error('Error embedding subtitles:', error);
             return;

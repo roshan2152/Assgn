@@ -3,7 +3,7 @@ const { type } = require("os");
 require("dotenv").config();
 
 exports.getVideoCaptions = async (Id) => {
-    const API_KEY = process.env.Rapid_API_KEY;
+    const API_KEY = process.env.RAPID_API_KEY;
     console.log(API_KEY)
     console.log(Id)
 
